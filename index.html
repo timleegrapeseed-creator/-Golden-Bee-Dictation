@@ -19,8 +19,32 @@ function sendToGoogleSheets(record){
 function savePractice(correct){if(!activeStudent)return;
   sendToGoogleSheets({kind:'practice',studentId:activeStudent.id,name:activeStudent.name,cls:activeStudent.cls,level,number:index+1,correct,date:new Date().toISOString()});const rows=getHistory();rows.push({date:new Date().toISOString(),level,number:index+1,correct});try{localStorage.setItem(historyKey(),JSON.stringify(rows.slice(-3000)))}catch(e){console.warn('Cannot save history',e)}renderHistory()}
 function renderHistory(){if(!activeStudent)return;const rows=getHistory(),correct=rows.filter(x=>x.correct).length,unique=new Set(rows.filter(x=>x.correct).map(x=>x.level+':'+x.number)).size;el('historyStats').textContent=`${rows.length} lượt kiểm tra • ${correct} lượt đúng • ${unique}/240 câu đã viết đúng ít nhất một lần`;const list=el('historyList');list.replaceChildren();rows.slice(-30).reverse().forEach(r=>{const li=document.createElement('li');const dt=new Date(r.date);li.textContent=`${dt.toLocaleString('vi-VN')} · ${r.level} · Câu ${r.number} · ${r.correct?'✓ Đúng':'↻ Cần luyện thêm'}`;list.appendChild(li)})}
-function enterStudent(person){activeStudent=person;el('studentIdentity').textContent=`👤 ${person.name} · ${person.cls}`;el('gate').classList.add('closed');renderHistory()}
+function enterStudent(person){activeStudent=person;gbLastTick=Date.now();gbLastInteraction=Date.now();el('studentIdentity').textContent=`👤 ${person.name} · ${person.cls}`;el('gate').classList.add('closed');renderHistory()}
 studentForm.addEventListener('submit',e=>{e.preventDefault();const name=el('studentName').value.trim().replace(/\s+/g,' '),cls=el('studentClass').value.trim().replace(/\s+/g,' ');if(!name||!cls)return;let id='';try{const saved=JSON.parse(localStorage.getItem('gb_dictation_student_v1')||'null');if(saved&&saved.name===name&&saved.cls===cls)id=saved.id}catch{}if(!id)id=(typeof crypto!=='undefined'&&crypto.randomUUID)?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2);const person={id,name,cls};try{localStorage.setItem('gb_dictation_student_v1',JSON.stringify(person))}catch{}enterStudent(person)});
-function switchStudent(){stopSpeech();activeStudent=null;try{localStorage.removeItem('gb_dictation_student_v1')}catch{}el('studentName').value='';el('studentClass').value='';el('answer').value='';el('studentIdentity').textContent='';el('gate').classList.remove('closed')}
+function switchStudent(){gbFlushTime();stopSpeech();activeStudent=null;try{localStorage.removeItem('gb_dictation_student_v1')}catch{}el('studentName').value='';el('studentClass').value='';el('answer').value='';el('studentIdentity').textContent='';el('gate').classList.remove('closed')}
 try{const saved=JSON.parse(localStorage.getItem('gb_dictation_student_v1')||'null');if(saved&&saved.id&&saved.name&&saved.cls)enterStudent(saved)}catch{}
+
+// Active-practice timer. Time is approximate and excludes hidden/idle periods.
+let gbActiveSeconds=0, gbLastTick=Date.now(), gbLastInteraction=Date.now();
+function gbMarkActivity(){if(activeStudent)gbLastInteraction=Date.now();}
+['pointerdown','keydown','input','touchstart'].forEach(t=>document.addEventListener(t,gbMarkActivity,{passive:true}));
+function gbFlushTime(){
+  if(!activeStudent || gbActiveSeconds<1)return;
+  const seconds=Math.round(gbActiveSeconds);
+  gbActiveSeconds=0;
+  sendToGoogleSheets({kind:'activity',studentId:activeStudent.id,
+    name:activeStudent.name,cls:activeStudent.cls,seconds,
+    date:new Date().toISOString(),eventId:(crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random())});
+}
+setInterval(()=>{
+  const now=Date.now(), delta=Math.min(10,Math.max(0,(now-gbLastTick)/1000));
+  gbLastTick=now;
+  if(activeStudent && !document.hidden && now-gbLastInteraction<120000){
+    gbActiveSeconds+=delta;
+    if(gbActiveSeconds>=60)gbFlushTime();
+  }
+},10000);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)gbFlushTime();gbLastTick=Date.now();});
+window.addEventListener('pagehide',gbFlushTime);
+
 </script></body></html>
